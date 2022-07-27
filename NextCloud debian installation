@@ -1,0 +1,608 @@
+su -
+apt install -y sudo
+usermod -aG sudo denisle
+exit
+
+reboot
+
+sudo -s
+
+apt install -y \
+apt-transport-https bash-completion bzip2 ca-certificates cron curl dialog \
+dirmngr ffmpeg ghostscript git gpg gnupg gnupg2 htop libfile-fcntllock-perl \
+libfontconfig1 libfuse2 locate lsb-release net-tools rsyslog screen smbclient \
+socat software-properties-common ssl-cert tree debian-keyring unzip wget zip
+
+nano /etc/hosts
+127.0.0.1 localhost
+127.0.1.1 nc.mydomain.ru
+# The following lines are desirable for IPv6 capable hosts
+::1       ihre.domain.de ip6-localhost ip6-loopback
+fe00::0   ip6-localnet
+ff00::0   ip6-mcastprefix
+ff02::1   ip6-allnodes
+ff02::2   ip6-allrouters
+78.107.237.169 nc.mydomain.ru
+
+nano /etc/hostname
+nc.mydomain.ru
+
+nano /etc/systemd/timesyncd.conf
+NTP=192.168.50.1
+
+systemctl restart systemd-timesyncd
+systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+reboot now
+
+sudo -s
+
+apt install -y debian-archive-keyring
+curl https://nginx.org/keys/nginx_signing.key | gpg --dearmor | tee /usr/share/keyrings/nginx-archive-keyring.gpg >/dev/null
+
+echo "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] http://nginx.org/packages/mainline/debian `lsb_release -cs` nginx" | tee /etc/apt/sources.list.d/nginx.list
+echo "deb [arch=amd64] https://packages.sury.org/php/ $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/php.list
+
+wget -qO - https://packages.sury.org/php/apt.gpg | apt-key add -
+
+wget https://downloads.mariadb.com/MariaDB/mariadb_repo_setup
+chmod +x mariadb_repo_setup && ./mariadb_repo_setup --mariadb-server-version="mariadb-10.6"
+
+apt remove nginx nginx-extras nginx-common nginx-full -y --allow-change-held-packages
+
+systemctl stop apache2.service
+systemctl disable apache2.service
+
+apt install -y nginx
+
+systemctl enable nginx.service
+
+mv /etc/nginx/nginx.conf /etc/nginx/nginx.conf.bak
+touch /etc/nginx/nginx.conf && nano /etc/nginx/nginx.conf
+user www-data;
+worker_processes auto;
+pid /var/run/nginx.pid;
+events {
+worker_connections 2048;
+multi_accept on; use epoll;
+}
+http {
+server_names_hash_bucket_size 64;
+access_log /var/log/nginx/access.log;
+error_log /var/log/nginx/error.log warn;
+# set_real_ip_from 127.0.0.1;
+real_ip_header X-Forwarded-For;
+real_ip_recursive on;
+include /etc/nginx/mime.types;
+default_type application/octet-stream;
+sendfile on;
+send_timeout 3600;
+tcp_nopush on;
+tcp_nodelay on;
+open_file_cache max=500 inactive=10m;
+open_file_cache_errors on;
+keepalive_timeout 65;
+reset_timedout_connection on;
+server_tokens off;
+resolver 127.0.0.53 valid=30s;
+resolver_timeout 5s;
+include /etc/nginx/conf.d/*.conf;
+}
+
+systemctl restart nginx.service
+
+apt update && apt install -y php-common \
+php8.1-{fpm,gd,curl,xml,zip,intl,mbstring,bz2,ldap,apcu,bcmath,gmp,imagick,igbinary,mysql,redis,smbclient,cli,common,opcache,readline} \
+imagemagick --allow-change-held-packages
+
+apt install -y ldap-utils nfs-common cifs-utils
+
+timedatectl set-timezone Europe/Moscow
+
+cp /etc/php/8.1/fpm/pool.d/www.conf /etc/php/8.1/fpm/pool.d/www.conf.bak
+cp /etc/php/8.1/fpm/php-fpm.conf /etc/php/8.1/fpm/php-fpm.conf.bak
+cp /etc/php/8.1/cli/php.ini /etc/php/8.1/cli/php.ini.bak
+cp /etc/php/8.1/fpm/php.ini /etc/php/8.1/fpm/php.ini.bak
+cp /etc/php/8.1/fpm/php-fpm.conf /etc/php/8.1/fpm/php-fpm.conf.bak
+cp /etc/php/8.1/mods-available/apcu.ini /etc/php/8.1/mods-available/apcu.ini.bak
+cp /etc/ImageMagick-6/policy.xml /etc/ImageMagick-6/policy.xml.bak
+
+AvailableRAM=$(awk '/MemAvailable/ {printf "%d", $2/1024}' /proc/meminfo)
+AverageFPM=$(ps --no-headers -o 'rss,cmd' -C php-fpm8.1 | awk '{ sum+=$1 } END { printf ("%d\n", sum/NR/1024,"M") }')
+FPMS=$((AvailableRAM/AverageFPM))
+PMaxSS=$((FPMS*2/3))
+PMinSS=$((PMaxSS/2))
+PStartS=$(((PMaxSS+PMinSS)/2))
+
+sed -i "s/;env\[HOSTNAME\] = /env[HOSTNAME] = /" /etc/php/8.1/fpm/pool.d/www.conf
+sed -i "s/;env\[TMP\] = /env[TMP] = /" /etc/php/8.1/fpm/pool.d/www.conf
+sed -i "s/;env\[TMPDIR\] = /env[TMPDIR] = /" /etc/php/8.1/fpm/pool.d/www.conf
+sed -i "s/;env\[TEMP\] = /env[TEMP] = /" /etc/php/8.1/fpm/pool.d/www.conf
+sed -i "s/;env\[PATH\] = /env[PATH] = /" /etc/php/8.1/fpm/pool.d/www.conf
+sed -i 's/pm.max_children =.*/pm.max_children = '$FPMS'/' /etc/php/8.1/fpm/pool.d/www.conf
+sed -i 's/pm.start_servers =.*/pm.start_servers = '$PStartS'/' /etc/php/8.1/fpm/pool.d/www.conf
+sed -i 's/pm.min_spare_servers =.*/pm.min_spare_servers = '$PMinSS'/' /etc/php/8.1/fpm/pool.d/www.conf
+sed -i 's/pm.max_spare_servers =.*/pm.max_spare_servers = '$PMaxSS'/' /etc/php/8.1/fpm/pool.d/www.conf
+sed -i "s/;pm.max_requests =.*/pm.max_requests = 1000/" /etc/php/8.1/fpm/pool.d/www.conf
+sed -i "s/allow_url_fopen =.*/allow_url_fopen = 1/" /etc/php/8.1/fpm/php.ini
+
+sed -i "s/output_buffering =.*/output_buffering = 'Off'/" /etc/php/8.1/cli/php.ini
+sed -i "s/max_execution_time =.*/max_execution_time = 3600/" /etc/php/8.1/cli/php.ini
+sed -i "s/max_input_time =.*/max_input_time = 3600/" /etc/php/8.1/cli/php.ini
+sed -i "s/post_max_size =.*/post_max_size = 10240M/" /etc/php/8.1/cli/php.ini
+sed -i "s/upload_max_filesize =.*/upload_max_filesize = 10240M/" /etc/php/8.1/cli/php.ini
+sed -i "s/;date.timezone.*/date.timezone = Europe\/\Moscow/" /etc/php/8.1/cli/php.ini
+
+sed -i "s/memory_limit = 128M/memory_limit = 512M/" /etc/php/8.1/fpm/php.ini
+sed -i "s/output_buffering =.*/output_buffering = 'Off'/" /etc/php/8.1/fpm/php.ini
+sed -i "s/max_execution_time =.*/max_execution_time = 3600/" /etc/php/8.1/fpm/php.ini
+sed -i "s/max_input_time =.*/max_input_time = 3600/" /etc/php/8.1/fpm/php.ini
+sed -i "s/post_max_size =.*/post_max_size = 10240M/" /etc/php/8.1/fpm/php.ini
+sed -i "s/upload_max_filesize =.*/upload_max_filesize = 10240M/" /etc/php/8.1/fpm/php.ini
+sed -i "s/;date.timezone.*/date.timezone = Europe\/\Moscow/" /etc/php/8.1/fpm/php.ini
+sed -i "s/;session.cookie_secure.*/session.cookie_secure = True/" /etc/php/8.1/fpm/php.ini
+sed -i "s/;opcache.enable=.*/opcache.enable=1/" /etc/php/8.1/fpm/php.ini
+sed -i "s/;opcache.enable_cli=.*/opcache.enable_cli=1/" /etc/php/8.1/fpm/php.ini
+sed -i "s/;opcache.memory_consumption=.*/opcache.memory_consumption=512/" /etc/php/8.1/fpm/php.ini
+sed -i "s/;opcache.interned_strings_buffer=.*/opcache.interned_strings_buffer=64/" /etc/php/8.1/fpm/php.ini
+sed -i "s/;opcache.max_accelerated_files=.*/opcache.max_accelerated_files=10000/" /etc/php/8.1/fpm/php.ini
+sed -i "s/;opcache.revalidate_freq=.*/opcache.revalidate_freq=1/" /etc/php/8.1/fpm/php.ini
+sed -i "s/;opcache.save_comments=.*/opcache.save_comments=1/" /etc/php/8.1/fpm/php.ini
+
+sed -i "s|;emergency_restart_threshold.*|emergency_restart_threshold = 10|g" /etc/php/8.1/fpm/php-fpm.conf
+sed -i "s|;emergency_restart_interval.*|emergency_restart_interval = 1m|g" /etc/php/8.1/fpm/php-fpm.conf
+sed -i "s|;process_control_timeout.*|process_control_timeout = 10|g" /etc/php/8.1/fpm/php-fpm.conf
+
+sed -i '$aapc.enable_cli=1' /etc/php/8.1/mods-available/apcu.ini
+
+sed -i "s/rights=\"none\" pattern=\"PS\"/rights=\"read|write\" pattern=\"PS\"/" /etc/ImageMagick-6/policy.xml
+sed -i "s/rights=\"none\" pattern=\"EPS\"/rights=\"read|write\" pattern=\"EPS\"/" /etc/ImageMagick-6/policy.xml
+sed -i "s/rights=\"none\" pattern=\"PDF\"/rights=\"read|write\" pattern=\"PDF\"/" /etc/ImageMagick-6/policy.xml
+sed -i "s/rights=\"none\" pattern=\"XPS\"/rights=\"read|write\" pattern=\"XPS\"/" /etc/ImageMagick-6/policy.xml
+
+systemctl restart php8.1-fpm.service nginx.service
+
+apt update && apt install -y mariadb-server
+
+mysql_secure_installation
+
+systemctl stop mysql
+mv /etc/mysql/my.cnf /etc/mysql/my.cnf.bak
+nano /etc/mysql/my.cnf
+[client]
+default-character-set = utf8mb4
+port = 3306
+socket = /var/run/mysqld/mysqld.sock
+[mysqld_safe]
+log_error=/var/log/mysql/mysql_error.log
+nice = 0
+socket = /var/run/mysqld/mysqld.sock
+[mysqld]
+basedir = /usr
+bind-address = 127.0.0.1
+binlog_format = ROW
+bulk_insert_buffer_size = 16M
+character-set-server = utf8mb4
+collation-server = utf8mb4_general_ci
+concurrent_insert = 2
+connect_timeout = 5
+datadir = /var/lib/mysql
+default_storage_engine = InnoDB
+expire_logs_days = 2
+general_log_file = /var/log/mysql/mysql.log
+general_log = 0
+innodb_buffer_pool_size = 2G
+innodb_buffer_pool_instances = 1
+innodb_flush_log_at_trx_commit = 2
+innodb_log_buffer_size = 32M
+innodb_max_dirty_pages_pct = 90
+innodb_file_per_table = 1
+innodb_open_files = 400
+innodb_io_capacity = 4000
+innodb_flush_method = O_DIRECT
+innodb_read_only_compressed=OFF
+key_buffer_size = 128M
+lc_messages_dir = /usr/share/mysql
+lc_messages = en_US
+log_bin = /var/log/mysql/mariadb-bin
+log_bin_index = /var/log/mysql/mariadb-bin.index
+log_error = /var/log/mysql/mysql_error.log
+log_slow_verbosity = query_plan
+log_warnings = 2
+long_query_time = 1
+max_allowed_packet = 16M
+max_binlog_size = 100M
+max_connections = 200
+max_heap_table_size = 64M
+myisam_recover_options = BACKUP
+myisam_sort_buffer_size = 512M
+port = 3306
+pid-file = /var/run/mysqld/mysqld.pid
+query_cache_limit = 2M
+query_cache_size = 64M
+query_cache_type = 1
+query_cache_min_res_unit = 2k
+read_buffer_size = 2M
+read_rnd_buffer_size = 1M
+skip-external-locking
+skip-name-resolve
+slow_query_log_file = /var/log/mysql/mariadb-slow.log
+slow-query-log = 1
+socket = /var/run/mysqld/mysqld.sock
+sort_buffer_size = 4M
+table_open_cache = 400
+thread_cache_size = 128
+tmp_table_size = 64M
+tmpdir = /tmp
+transaction_isolation = READ-COMMITTED
+#unix_socket=OFF
+user = mysql
+wait_timeout = 600
+[mysqldump]
+max_allowed_packet = 16M
+quick
+quote-names
+[isamchk]
+key_buffer = 16M
+
+systemctl restart mysql.service
+mysql -uroot -p
+CREATE DATABASE nextclouddb CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci; CREATE USER denisle@localhost identified by 'mypassword'; GRANT ALL PRIVILEGES on nextclouddb.* to denisle@localhost; FLUSH privileges; quit;
+
+mysql -h localhost -uroot -p -e "SELECT @@TX_ISOLATION; SELECT SCHEMA_NAME 'database', default_character_set_name 'charset', DEFAULT_COLLATION_NAME 'collation' FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='nextclouddb'"
+
+apt update && apt install -y redis-server
+
+cp /etc/redis/redis.conf /etc/redis/redis.conf.bak
+sed -i "s/port 6379/port 0/" /etc/redis/redis.conf
+sed -i s/\#\ unixsocket/\unixsocket/g /etc/redis/redis.conf
+sed -i "s/unixsocketperm 700/unixsocketperm 770/" /etc/redis/redis.conf
+sed -i "s/# maxclients 10000/maxclients 10240/" /etc/redis/redis.conf
+usermod -aG redis www-data
+cp /etc/sysctl.conf /etc/sysctl.conf.bak
+sed -i '$avm.overcommit_memory = 1' /etc/sysctl.conf
+
+reboot now
+
+sudo -s
+[ -f /etc/nginx/conf.d/default.conf ] && mv /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.bak
+touch /etc/nginx/conf.d/default.conf
+touch /etc/nginx/conf.d/http.conf
+touch /etc/nginx/conf.d/nextcloud.conf
+
+nano /etc/nginx/conf.d/http.conf
+upstream php-handler {
+server unix:/run/php/php8.1-fpm.sock;
+}
+map $arg_v $asset_immutable {
+"" "";
+default "immutable";
+}
+server {
+listen 80 default_server;
+listen [::]:80 default_server;
+server_name nc.mydomain.ru;
+root /var/www;
+location ^~ /.well-known/acme-challenge {
+default_type text/plain;
+root /var/www/letsencrypt;
+}
+location / {
+return 301 https://$host$request_uri;
+}
+}
+
+___________________________________________________BACKUP
+
+nano /etc/nginx/conf.d/nextcloud.conf
+server {
+listen 80 default_server;
+listen [::]:80 default_server;
+server_name nc.mydomain.ru;
+client_max_body_size 10G;
+client_body_timeout 3600s;
+fastcgi_buffers 64 4K;
+gzip on;
+gzip_vary on;
+gzip_comp_level 4;
+gzip_min_length 256;
+gzip_proxied expired no-cache no-store private no_last_modified no_etag auth;
+gzip_types application/atom+xml application/javascript application/json application/ld+json application/manifest+json application/rss+xml application/vnd.geo+json application/vnd.ms-fontobject application/wasm application/x-font-ttf application/x-web-app-manifest+json application/xhtml+xml application/xml font/opentype image/bmp image/svg+xml image/x-icon text/cache-manifest text/css text/plain text/vcard text/vnd.rim.location.xloc text/vtt text/x-component text/x-cross-domain-policy;
+add_header Strict-Transport-Security            "max-age=15768000; includeSubDomains; preload;" always;
+add_header Permissions-Policy                   "interest-cohort=()";
+add_header Referrer-Policy                      "no-referrer"   always;
+add_header X-Content-Type-Options               "nosniff"       always;
+add_header X-Download-Options                   "noopen"        always;
+add_header X-Frame-Options                      "SAMEORIGIN"    always;
+add_header X-Permitted-Cross-Domain-Policies    "none"          always;
+add_header X-Robots-Tag                         "none"          always;
+add_header X-XSS-Protection                     "1; mode=block" always;
+fastcgi_hide_header X-Powered-By;
+root /var/www/nextcloud;
+index index.php index.html /index.php$request_uri;
+location = / {
+if ( $http_user_agent ~ ^DavClnt ) {
+return 302 /remote.php/webdav/$is_args$args;
+}
+}
+location = /robots.txt {
+allow all;
+log_not_found off;
+access_log off;
+}
+location ^~ /apps/rainloop/app/data {
+deny all;
+}
+location ^~ /.well-known {
+location = /.well-known/carddav { return 301 /remote.php/dav/; }
+location = /.well-known/caldav  { return 301 /remote.php/dav/; }
+location /.well-known/pki-validation { try_files $uri $uri/ =404; }
+return 301 /index.php$request_uri;
+}
+location ~ ^/(?:build|tests|config|lib|3rdparty|templates|data)(?:$|/)  { return 404; }
+location ~ ^/(?:\.|autotest|occ|issue|indie|db_|console)                { return 404; }
+location ~ \.php(?:$|/) {
+rewrite ^/(?!index|remote|public|cron|core\/ajax\/update|status|ocs\/v[12]|updater\/.+|oc[ms]-provider\/.+|.+\/richdocumentscode\/proxy) /index.php$request_uri;
+fastcgi_split_path_info ^(.+?\.php)(/.*)$;
+set $path_info $fastcgi_path_info;
+try_files $fastcgi_script_name =404;
+include fastcgi_params;
+fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+fastcgi_param PATH_INFO $path_info;
+fastcgi_param HTTPS on;
+fastcgi_param modHeadersAvailable true;
+fastcgi_param front_controller_active true;
+fastcgi_pass php-handler;
+fastcgi_intercept_errors on;
+fastcgi_request_buffering off;
+fastcgi_read_timeout 3600;
+fastcgi_send_timeout 3600;
+fastcgi_connect_timeout 3600;
+fastcgi_max_temp_file_size 0;
+}
+location ~ \.(?:css|js|svg|gif|png|jpg|ico|wasm|tflite|map)$ {
+try_files $uri /index.php$request_uri;
+add_header Cache-Control "public, max-age=15778463, $asset_immutable";
+expires 6M;
+access_log off;
+location ~ \.wasm$ {
+default_type application/wasm;
+}
+}
+location ~ \.woff2?$ {
+try_files $uri /index.php$request_uri;
+expires 7d;
+access_log off;
+}
+location /remote {
+return 301 /remote.php$request_uri;
+}
+location / {
+try_files $uri $uri/ /index.php$request_uri;
+}
+}
+
+openssl dhparam -dsaparam -out /etc/ssl/certs/dhparam.pem 4096
+
+systemctl restart nginx.service
+
+cd /usr/local/src
+
+wget https://download.nextcloud.com/server/releases/latest.tar.bz2
+wget https://download.nextcloud.com/server/releases/latest.tar.bz2.md5
+
+md5sum -c latest.tar.bz2.md5 < latest.tar.bz2
+
+tar -xjf latest.tar.bz2 -C /var/www && chown -R www-data:www-data /var/www/ && rm -f latest.tar.bz2
+
+nano /root/permissions.sh
+#!/bin/bash
+find /var/www/ -type f -print0 | xargs -0 chmod 0640
+find /var/www/ -type d -print0 | xargs -0 chmod 0750
+chmod -R 775 /var/www/letsencrypt
+chmod -R 770 /etc/letsencrypt 
+chown -R www-data:www-data /var/www /etc/letsencrypt
+chown -R www-data:www-data /var/nc_data
+chmod 0644 /var/www/nextcloud/.htaccess
+chmod 0644 /var/www/nextcloud/.user.ini
+exit 0
+
+chmod +x /root/permissions.sh
+/root/permissions.sh
+
+systemctl restart nginx.service
+
+sudo -u www-data php /var/www/nextcloud/occ maintenance:install --database "mysql" --database-name "nextclouddb" --database-user "denisle" --database-pass "mypassword" --admin-user "UserPro" --admin-pass "mypassword" --data-dir "/var/nc_data"
+
+sudo -u www-data php /var/www/nextcloud/occ config:system:set trusted_domains 0 --value=nc.mydomain.ru
+
+sudo -u www-data php /var/www/nextcloud/occ config:system:set overwrite.cli.url --value=https://nc.mydomain.ru
+
+sudo -u www-data cp /var/www/nextcloud/config/config.php /var/www/nextcloud/config/config.php.bak 
+sudo -u www-data sed -i 's/^[ ]*//' /var/www/nextcloud/config/config.php
+sudo -u www-data sed -i '/);/d' /var/www/nextcloud/config/config.php
+
+sudo -u www-data cat <<EOF >>/var/www/nextcloud/config/config.php
+'activity_expire_days' => 14,
+'allow_local_remote_servers' => true,
+'auth.bruteforce.protection.enabled' => true,
+'blacklisted_files' => 
+array (
+0 => '.htaccess',
+1 => 'Thumbs.db',
+2 => 'thumbs.db',
+),
+'cron_log' => true,
+'default_phone_region' => 'RU',
+'defaultapp' => 'files,dashboard',
+'enable_previews' => true,
+'enabledPreviewProviders' => 
+array (
+0 => 'OC\Preview\PNG',
+1 => 'OC\Preview\JPEG',
+2 => 'OC\Preview\GIF',
+3 => 'OC\Preview\BMP',
+4 => 'OC\Preview\XBitmap',
+5 => 'OC\Preview\Movie',
+6 => 'OC\Preview\PDF',
+7 => 'OC\Preview\MP3',
+8 => 'OC\Preview\TXT',
+9 => 'OC\Preview\PSD',
+10 => 'OC\Preview\AI',
+11 => 'OC\Preview\EPS',
+12 => 'OC\Preview\TIF',
+13 => 'OC\Preview\MP4',
+14 => 'OC\Preview\MPG',
+14 => 'OC\Preview\MOV',
+15 => 'OC\Preview\HEIC',
+16 => 'OC\Preview\MarkDown',
+17 => 'OC\Preview\OpenDocument',
+18 => 'OC\Preview\Krita',
+19 => 'OC\Preview\Illustrator',
+20 => 'OC\Preview\MSOffice2003',
+21 => 'OC\Preview\MSOffice2007',
+22 => 'OC\Preview\MSOfficeDoc',
+23 => 'OC\Preview\SVG',
+24 => 'OC\Preview\MKV',
+25 => 'OC\Preview\Photoshop',
+26 => 'OC\Preview\Postscript',
+27 => 'OC\Preview\StarOffice',
+28 => 'OC\Preview\AVI',
+),
+'filesystem_check_changes' => 0,
+'filelocking.enabled' => 'true',
+'htaccess.RewriteBase' => '/',
+'integrity.check.disabled' => false,
+'knowledgebaseenabled' => false,
+'logfile' => '/var/log/nextcloud/nextcloud.log',
+'loglevel' => 2,
+'logtimezone' => 'Europe/Moscow',
+'log_rotate_size' => '104857600',
+'maintenance' => false,
+'memcache.local' => '\OC\Memcache\APCu',
+'memcache.locking' => '\OC\Memcache\Redis',
+'overwriteprotocol' => 'http',
+'preview_max_x' => 2048,
+'preview_max_y' => 2048,
+'preview_max_scale_factor' => 1,
+'profile.enabled' => false,
+'redis' => 
+array (
+'host' => '/var/run/redis/redis-server.sock',
+'port' => 0,
+'timeout' => 0.5,
+'dbindex' => 1,
+),
+'quota_include_external_storage' => false,
+'share_folder' => '/Freigaben',
+'skeletondirectory' => '',
+'theme' => '',
+'trashbin_retention_obligation' => 'auto, 7',
+'updater.release.channel' => 'stable',
+);
+EOF
+
+sudo -u www-data sed -i "s/output_buffering=.*/output_buffering=0/" /var/www/nextcloud/.user.ini
+
+sudo -u www-data php /var/www/nextcloud/occ app:disable survey_client
+sudo -u www-data php /var/www/nextcloud/occ app:disable firstrunwizard
+sudo -u www-data php /var/www/nextcloud/occ app:enable admin_audit
+sudo -u www-data php /var/www/nextcloud/occ app:enable files_pdfviewer
+
+sudo -u www-data /usr/bin/php /var/www/nextcloud/occ app:install richdocuments
+sudo -u www-data /usr/bin/php /var/www/nextcloud/occ app:install richdocumentscode
+
+systemctl stop nginx.service
+systemctl stop php8.1-fpm.service
+systemctl restart mysql.service
+systemctl restart php8.1-fpm.service
+systemctl restart redis-server.service
+systemctl restart nginx.service
+
+crontab -u www-data -e
+*/5 * * * * php -f /var/www/nextcloud/cron.php > /dev/null 2>&1
+
+crontab -u www-data -e
+
+sudo -u www-data php /var/www/nextcloud/occ background:cron
+
+___________________________________________________BACKUP
+
+apt update && apt install -y fail2ban
+
+touch /etc/fail2ban/filter.d/nextcloud.conf
+
+cat <<EOF >/etc/fail2ban/filter.d/nextcloud.conf
+[Definition]
+_groupsre = (?:(?:,?\s*"\w+":(?:"[^"]+"|\w+))*)
+failregex = ^\{%(_groupsre)s,?\s*"remoteAddr":"<HOST>"%(_groupsre)s,?\s*"message":"Login failed:
+            ^\{%(_groupsre)s,?\s*"remoteAddr":"<HOST>"%(_groupsre)s,?\s*"message":"Trusted domain error.
+datepattern = ,?\s*"time"\s*:\s*"%%Y-%%m-%%d[T ]%%H:%%M:%%S(%%z)?"
+EOF
+
+cat /etc/fail2ban/filter.d/nextcloud.conf
+
+nano /etc/fail2ban/jail.d/nextcloud.local
+[nextcloud]
+backend = auto
+enabled = true
+port = 80,443
+protocol = tcp
+filter = nextcloud
+maxretry = 5
+bantime = 3600
+findtime = 36000
+logpath = /var/log/nextcloud/nextcloud.log 
+
+systemctl restart fail2ban.service
+fail2ban-client status nextcloud
+
+fail2ban-client status nextcloud
+
+apt install -y ufw
+ufw allow 80/tcp comment "http"
+ufw allow 443/tcp comment "https"
+ufw allow 22/tcp comment "SSH"
+
+ufw allow proto tcp from 192.168.0.0/16 to any port 22 comment "SSH in LAN"
+
+ufw logging medium
+ufw default deny incoming
+
+ufw enable
+systemctl restart ufw.service
+
+___________________________________________________BACKUP
+
+cd /root
+nano update.sh
+#!/bin/bash
+apt-get update
+apt-get upgrade -V
+apt-get autoremove -y
+apt-get autoclean -y
+chown -R www-data:www-data /var/www/nextcloud
+find /var/www/nextcloud/ -type d -exec chmod 750 {} \;
+find /var/www/nextcloud/ -type f -exec chmod 640 {} \;
+/usr/sbin/service nginx stop
+sudo -u www-data php /var/www/nextcloud/updater/updater.phar
+sudo -u www-data php /var/www/nextcloud/occ status
+sudo -u www-data php /var/www/nextcloud/occ -V
+sudo -u www-data php /var/www/nextcloud/occ db:add-missing-primary-keys
+sudo -u www-data php /var/www/nextcloud/occ db:add-missing-indices
+sudo -u www-data php /var/www/nextcloud/occ db:add-missing-columns
+sudo -u www-data php /var/www/nextcloud/occ db:convert-filecache-bigint
+sed -i "s/output_buffering=.*/output_buffering=0/" /var/www/nextcloud/.user.ini
+chown -R www-data:www-data /var/www/nextcloud
+redis-cli -s /var/run/redis/redis-server.sock <<EOF
+FLUSHALL
+quit
+EOF
+sudo -u www-data php /var/www/nextcloud/occ files:scan --all
+sudo -u www-data php /var/www/nextcloud/occ files:scan-app-data
+sudo -u www-data php /var/www/nextcloud/occ app:update --all
+/usr/sbin/service php8.1-fpm restart
+/usr/sbin/service nginx restart
+exit 0
+
+chmod +x /root/update.sh
+/root/update.sh
